@@ -1,0 +1,161 @@
+"""Zero Inflated Binomial distribution (ZIBI). Port of gamlss.dist R/ZIBI.R."""
+
+from __future__ import annotations
+
+import numpy as np
+from scipy import stats as _st
+
+from ..family import GamlssFamily, checklink
+from .BI import _BI_dldm, dBI, _dBI0
+
+
+def ZIBI(mu_link="logit", sigma_link="logit"):
+    mstats = checklink("mu.link", "ZIBI", mu_link,
+                       ("logit", "probit", "cloglog", "cauchit", "log", "own"))
+    dstats = checklink("sigma.link", "ZIBI", sigma_link,
+                       ("logit", "probit", "cloglog", "cauchit", "log", "own"))
+
+    def dldm(y, mu, sigma, bd):
+        dldm0 = ((1 - sigma)
+                 * ((sigma + (1 - sigma) * _dBI0(bd, mu)) ** (-1))
+                 * _dBI0(bd, mu) * _BI_dldm(0, mu, bd))
+        dldm = np.where(y == 0, dldm0, _BI_dldm(y, mu, bd))
+        return dldm
+
+    def d2ldm2(y, mu, sigma, bd):
+        dldm0 = ((1 - sigma)
+                 * ((sigma + (1 - sigma) * _dBI0(bd, mu)) ** (-1))
+                 * _dBI0(bd, mu) * _BI_dldm(0, mu, bd))
+        dldm = np.where(y == 0, dldm0, _BI_dldm(y, mu, bd))
+        d2ldm2 = -dldm * dldm
+        return d2ldm2
+
+    def dldd(y, mu, sigma, bd):
+        dldd0 = (((sigma + (1 - sigma) * _dBI0(bd, mu)) ** (-1))
+                 * (1 - _dBI0(bd, mu)))
+        dldd = np.where(y == 0, dldd0, -1 / (1 - sigma))
+        return dldd
+
+    def d2ldd2(y, mu, sigma, bd):
+        dldd0 = (((sigma + (1 - sigma) * _dBI0(bd, mu)) ** (-1))
+                 * (1 - _dBI0(bd, mu)))
+        dldd = np.where(y == 0, dldd0, -1 / (1 - sigma))
+        d2ldd2 = -dldd * dldd
+        return d2ldd2
+
+    def d2ldmdd(y, mu, sigma, bd):
+        dldm0 = ((1 - sigma)
+                 * ((sigma + (1 - sigma) * _dBI0(bd, mu)) ** (-1))
+                 * _dBI0(bd, mu) * _BI_dldm(0, mu, bd))
+        dldm = np.where(y == 0, dldm0, _BI_dldm(y, mu, bd))
+        dldd0 = (((sigma + (1 - sigma) * _dBI0(bd, mu)) ** (-1))
+                 * (1 - _dBI0(bd, mu)))
+        dldd = np.where(y == 0, dldd0, -1 / (1 - sigma))
+        d2ldmdd = -dldm * dldd
+        return d2ldmdd
+
+    return GamlssFamily(
+        family=("ZIBI", "Binomial Zero Inflated"),
+        parameters={"mu": True, "sigma": True},
+        nopar=2,
+        type="Discrete",
+        links={"mu": mstats, "sigma": dstats},
+        derivatives={
+            "dldm": dldm,
+            "d2ldm2": d2ldm2,
+            "dldd": dldd,
+            "d2ldd2": d2ldd2,
+            "d2ldmdd": d2ldmdd,
+        },
+        G_dev_incr=lambda y, mu, sigma, bd: -2 * dZIBI(y, bd, mu, sigma,
+                                                       log=True),
+        rqres={"pfun": "pZIBI", "type": "Discrete", "ymin": 0},
+        initial={
+            "mu": lambda y: np.full(len(y), 0.5),
+            "sigma": lambda y: np.full(len(y), 0.3),
+        },
+        valid={
+            "mu": lambda mu: bool(np.all((mu > 0) & (mu < 1))),
+            "sigma": lambda sigma: bool(np.all((sigma > 0) & (sigma < 1))),
+        },
+        y_valid=lambda y: bool(np.all(y >= 0)),
+        mean=lambda bd, mu, sigma: (1 - sigma) * bd * mu,
+        variance=lambda bd, mu, sigma: (1 - sigma) * bd * mu
+        * (1 - mu + bd * mu * sigma),
+    )
+
+
+def dZIBI(x, bd=1, mu=0.5, sigma=0.1, log=False):
+    if np.any(np.asarray(mu) <= 0) or np.any(np.asarray(mu) >= 1):
+        raise ValueError("mu must be between 0 and 1")
+    if np.any(np.asarray(sigma) <= 0) or np.any(np.asarray(sigma) >= 1):
+        raise ValueError("sigma must be between 0 and 1")
+    x, sigma, mu, bd = np.broadcast_arrays(
+        np.asarray(x, float), np.asarray(sigma, float),
+        np.asarray(mu, float), np.asarray(bd, float)
+    )
+    with np.errstate(divide="ignore", invalid="ignore"):
+        logfy = np.where(
+            x == 0,
+            np.log(sigma + (1 - sigma) * _dBI0(bd, mu)),
+            np.log(1 - sigma) + dBI(x, bd, mu, log=True),
+        )
+    fy = np.exp(logfy) if log is False else logfy
+    fy = np.where(x < 0, 0.0, fy)
+    return fy
+
+
+def pZIBI(q, bd=1, mu=0.5, sigma=0.1, lower_tail=True, log_p=False):
+    if np.any(np.asarray(mu) <= 0) or np.any(np.asarray(mu) >= 1):
+        raise ValueError("mu must be between 0 and 1")
+    if np.any(np.asarray(sigma) <= 0) or np.any(np.asarray(sigma) >= 1):
+        raise ValueError("sigma must be between 0 and 1")
+    q, sigma, mu, bd = np.broadcast_arrays(
+        np.asarray(q, float), np.asarray(sigma, float),
+        np.asarray(mu, float), np.asarray(bd, float)
+    )
+    cdf = _st.binom.cdf(q, n=bd, p=mu)
+    cdf = sigma + (1 - sigma) * cdf
+    if not lower_tail:
+        cdf = 1 - cdf
+    if log_p:
+        with np.errstate(divide="ignore", invalid="ignore"):
+            cdf = np.log(cdf)
+    cdf = np.where(q < 0, 0.0, cdf)
+    return cdf
+
+
+def qZIBI(p, bd=1, mu=0.5, sigma=0.1, lower_tail=True, log_p=False):
+    if np.any(np.asarray(mu) <= 0) or np.any(np.asarray(mu) >= 1):
+        raise ValueError("mu must be between 0 and 1")
+    if np.any(np.asarray(sigma) <= 0):
+        raise ValueError("sigma must be greater than 0")
+    p = np.asarray(p, float)
+    if np.any(p < 0) or np.any(p > 1):
+        raise ValueError("p must be between 0 and 1")
+    if log_p:
+        p = np.exp(p)
+    if not lower_tail:
+        p = 1 - p
+    p, sigma, mu, bd = np.broadcast_arrays(
+        p, np.asarray(sigma, float), np.asarray(mu, float),
+        np.asarray(bd, float)
+    )
+    pnew = (p - sigma) / (1 - sigma) - 1e-10
+    with np.errstate(invalid="ignore"):
+        q = np.where(pnew > 0, _st.binom.ppf(pnew, n=bd, p=mu), 0)
+    return q
+
+
+def rZIBI(n, bd=1, mu=0.5, sigma=0.1, rng=None):
+    if np.any(np.asarray(mu) <= 0) or np.any(np.asarray(mu) >= 1):
+        raise ValueError("mu must be between 0 and 1")
+    if np.any(np.asarray(sigma) <= 0):
+        raise ValueError("sigma must greated than 0")
+    if np.any(np.asarray(n) <= 0):
+        raise ValueError("n must be a positive integer")
+    rng = np.random.default_rng() if rng is None else rng
+    n = int(np.ceil(n))
+    p = rng.uniform(size=n)
+    r = qZIBI(p, bd=bd, mu=mu, sigma=sigma)
+    return np.asarray(r).astype(int)

@@ -1,0 +1,4 @@
+prune tests
+prune r-scripts
+prune r-src
+prune dist
