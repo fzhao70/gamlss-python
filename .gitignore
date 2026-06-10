@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+
+# Original R package sources (download with r-scripts/fetch_r_sources.sh)
+r-src/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+.claude/
