@@ -4,8 +4,7 @@
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://pypi.org/project/gamlss/)
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue)](LICENSE)
 
-*R's `gamlss` in pure Python, numerically verified against the
-original.*
+*R's `gamlss` in pure Python*
 
 A Python port of the R packages **gamlss** (5.5-0) and **gamlss.dist**
 (6.1-1): Generalised Additive Models for Location, Scale and Shape
@@ -13,14 +12,13 @@ A Python port of the R packages **gamlss** (5.5-0) and **gamlss.dist**
 
 - [Pure Python](#pure-python)
 - [Status](#status)
+- [License and attribution](#license-and-attribution)
 - [Install](#install)
 - [Quick start](#quick-start)
 - [API mapping (R -> Python)](#api-mapping-r---python)
 - [Families implemented](#families-implemented)
 - [Verification against R](#verification-against-r)
 - [Known, documented differences](#known-documented-differences)
-- [Releasing to PyPI](#releasing-to-pypi)
-- [License and attribution](#license-and-attribution)
 - [Layout](#layout)
 
 The port reproduces the original R implementation *numerically*: the
@@ -48,6 +46,24 @@ but beyond that only some of the core functions have been manually
 tested; less-travelled code paths may still contain porting bugs.
 If a result matters, cross-check it against the original R package,
 and please report discrepancies via the issue tracker.
+
+## License and attribution
+
+This package is a Python translation of the R packages
+[gamlss](https://cran.r-project.org/package=gamlss) and
+[gamlss.dist](https://cran.r-project.org/package=gamlss.dist) by Mikis
+Stasinopoulos, Robert Rigby and co-authors (licensed `GPL-2 | GPL-3`),
+and bundles datasets from
+[gamlss.data](https://cran.r-project.org/package=gamlss.data). As a
+derivative work it is distributed under the **GNU GPL v3** (see
+`LICENSE`). It is not affiliated with or endorsed by the original
+authors.
+
+If you use GAMLSS in published work, please cite:
+
+> Rigby, R. A. and Stasinopoulos, D. M. (2005). Generalized additive
+> models for location, scale and shape (with discussion).
+> *Applied Statistics*, 54, 507-554.
 
 ## Install
 
@@ -181,40 +197,6 @@ python -m pytest tests/ -q
 - Smoothing/additive terms (`pb()`, `cs()`, ...) are not ported yet —
   the parametric GAMLSS core (formulas, all four parameters, RS/CG,
   weights, offsets, factors) is complete.
-
-## Releasing to PyPI
-
-Releases are published by GitHub Actions
-(`.github/workflows/publish.yml`) via PyPI [trusted
-publishing](https://docs.pypi.org/trusted-publishers/) — no API tokens
-needed. One-time setup: on pypi.org, add a "pending publisher" for the
-project `gamlss` pointing at this repo
-(`fzhao70/gamlss-python`, workflow `publish.yml`, environment `pypi`),
-and create a GitHub environment named `pypi` in the repo settings.
-Then to release:
-
-1. Bump `version` in `pyproject.toml`.
-2. Tag and create a GitHub release (`git tag v0.1.0 && git push --tags`,
-   then "Releases → Draft a new release").
-3. The workflow builds the sdist/wheel and uploads to PyPI.
-
-## License and attribution
-
-This package is a Python translation of the R packages
-[gamlss](https://cran.r-project.org/package=gamlss) and
-[gamlss.dist](https://cran.r-project.org/package=gamlss.dist) by Mikis
-Stasinopoulos, Robert Rigby and co-authors (licensed `GPL-2 | GPL-3`),
-and bundles datasets from
-[gamlss.data](https://cran.r-project.org/package=gamlss.data). As a
-derivative work it is distributed under the **GNU GPL v3** (see
-`LICENSE`). It is not affiliated with or endorsed by the original
-authors.
-
-If you use GAMLSS in published work, please cite:
-
-> Rigby, R. A. and Stasinopoulos, D. M. (2005). Generalized additive
-> models for location, scale and shape (with discussion).
-> *Applied Statistics*, 54, 507-554.
 
 ## Layout
 
