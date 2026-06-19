@@ -15,10 +15,13 @@ map to Python's ``**`` under patsy, so ``^`` is rewritten to ``**``.
 from __future__ import annotations
 
 import re
+from collections import OrderedDict
 
 import numpy as np
 import pandas as pd
 import patsy
+
+from .smooth import PB
 
 
 # ---------------------------------------------------------------- poly
@@ -142,6 +145,69 @@ def _r_to_patsy(formula):
     return formula.replace("^", "**")
 
 
+# ----------------------------------------------------------- smoothers
+_SMOOTHER_RE = re.compile(r"(pb|pbz)\s*\((.*)\)\s*$", re.S)
+# R argument name -> PB constructor keyword
+_PB_KW = {"lambda": "lambda_", "max.df": "max_df"}
+_KW_ENV = {"TRUE": True, "FALSE": False, "T": True, "F": False, "NULL": None}
+
+
+def _is_smoother(term):
+    """True if a formula term is a pb()/pbz() smoother call."""
+    return _SMOOTHER_RE.fullmatch(term.strip()) is not None
+
+
+def _split_args(s):
+    """Split a call's argument string on top-level commas."""
+    out, depth, cur = [], 0, ""
+    for ch in s:
+        if ch in "([":
+            depth += 1
+        elif ch in ")]":
+            depth -= 1
+        if ch == "," and depth == 0:
+            out.append(cur)
+            cur = ""
+        else:
+            cur += ch
+    out.append(cur)
+    return [a.strip() for a in out if a.strip()]
+
+
+def _parse_smoother(term, data, env):
+    """Parse ``pb(x, ...)`` -> (label, PB object, linear x column).
+
+    The first positional argument is the smoothed variable (evaluated in the
+    data/formula environment); remaining ``key=value`` args are mapped to the
+    PB constructor (``lambda`` -> ``lambda_``, ``max.df`` -> ``max_df``).
+    """
+    m = _SMOOTHER_RE.fullmatch(term.strip())
+    kind, inner = m.group(1), m.group(2)
+    args = _split_args(inner)
+    if not args:
+        raise ValueError(f"smoother {term!r} needs a variable")
+    xval = eval(_r_to_patsy(args[0]), {"__builtins__": {}}, _DataEnv(data, env))
+    if isinstance(xval, pd.Series):
+        xval = xval.to_numpy()
+    xval = np.asarray(xval, dtype=float)
+    kwargs = {}
+    norm_args = [args[0]]  # the smoothed variable, kept verbatim
+    for a in args[1:]:
+        if "=" not in a:
+            raise ValueError(f"unexpected positional argument in {term!r}: {a!r}")
+        k, v = a.split("=", 1)
+        k, v = k.strip(), v.strip()
+        key = _PB_KW.get(k, k.replace(".", "_"))
+        kwargs[key] = eval(v, {"__builtins__": {}}, dict(_KW_ENV))
+        norm_args.append(f"{k} = {v}")  # R deparse: "key = value"
+    if kind == "pbz":
+        raise NotImplementedError("pbz() is not implemented yet (Step 6)")
+    pb = PB(xval, **kwargs)
+    pb.name = args[0].strip()
+    label = f"{kind}({', '.join(norm_args)})"  # R-style term label
+    return label, pb, xval
+
+
 _TL = re.compile(r"\[T\.([^\]]+)\]")  # treatment-coded level
 _LV = re.compile(r"\[([^\]]+)\]")  # full-rank level or column index
 
@@ -210,21 +276,41 @@ class ParamFormula:
         return np.asarray(y)
 
     def design(self, data):
-        """Build the design matrix; returns (X ndarray, design_info).
+        """Build the design matrix; returns (X, design_info, smoothers).
 
-        Columns are reordered to R's term ordering (stable sort by
-        interaction degree, then order of appearance in the formula);
-        patsy sorts categorical terms first, R does not.
+        Parametric terms go through patsy and are reordered to R's term
+        order.  pb()/pbz() smoother terms are pulled out: each contributes
+        its *linear* column (named by the call, e.g. ``"pb(x)"``) appended
+        after the parametric columns -- exactly as R's pb() puts ``xvar <- x``
+        in the design matrix -- and a PB object that the engine fits by
+        backfitting.  ``smoothers`` is an OrderedDict {label: PB} (empty when
+        the formula has no smoothers).
         """
-        rhs = _r_to_patsy(self.rhs)
+        par_terms, smooth_terms = [], []
+        for t in _split_terms(self.rhs):
+            (smooth_terms if _is_smoother(t) else par_terms).append(t)
+        if smooth_terms:
+            par_rhs = " + ".join(par_terms) if par_terms else "1"
+        else:
+            par_rhs = self.rhs  # unchanged path when no smoothers
+
+        rhs = _r_to_patsy(par_rhs)
         X = patsy.dmatrix(
             rhs, data, eval_env=patsy.EvalEnvironment([self.env]),
             return_type="matrix", NA_action="raise",
         )
         di = X.design_info
-        di, perm = _reorder_like_r(di, self.rhs)
-        X = np.asarray(X, dtype=float)[:, perm]
-        return X, di
+        di, perm = _reorder_like_r(di, par_rhs)
+        Xpar = np.asarray(X, dtype=float)[:, perm]
+
+        smoothers = OrderedDict()
+        cols = []
+        for t in smooth_terms:
+            label, pb, xcol = _parse_smoother(t, data, self.env)
+            smoothers[label] = pb
+            cols.append(xcol)
+        X_full = np.hstack([Xpar, np.column_stack(cols)]) if cols else Xpar
+        return X_full, di, smoothers
 
     def design_like(self, design_info, data):
         """Design matrix for new data using a memorised design."""

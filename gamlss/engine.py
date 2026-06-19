@@ -183,6 +183,56 @@ def lm_wfit(x, y, w):
     }
 
 
+# --------------------------------------------------------- backfitting
+def additive_fit(X, y, w, s, smoothers, maxit, tol):
+    """Backfitting (Gauss-Seidel) -- port of R additive.fit (add.r).
+
+    Alternates a weighted-LS fit of the full parametric design ``X`` (which
+    includes the *linear* column of each smoother) with each smoother's fit
+    to its own partial residual, until the relative change in the fitted
+    functions drops below ``tol`` or ``maxit`` sweeps are reached.
+
+    ``s`` is the matrix of current smoother contributions (one column per
+    smoother, same order as ``smoothers``).  A copy is taken so the caller's
+    array is never mutated; the updated matrix is returned as ``smooth``.
+    """
+    y = np.asarray(y, dtype=float)
+    w = np.asarray(w, dtype=float)
+    s = np.array(s, dtype=float, copy=True)
+    residuals = y - s.sum(axis=1)
+    nsm = len(smoothers)
+    fit = {"fitted.values": 0.0}
+    df = np.full(nsm, np.nan)
+    lam = np.full(nsm, np.nan)
+    coef_smo = [None] * nsm
+    ratio = tol + 1.0
+    nit = 0
+    while ratio > tol and nit < maxit:
+        nit += 1
+        z = residuals + fit["fitted.values"]
+        fit = lm_wfit(X, z, w)                       # parametric sweep
+        residuals = fit["residuals"]
+        deltaf = 0.0
+        for j, sm in enumerate(smoothers):
+            old = s[:, j].copy()
+            z = residuals + s[:, j]                  # partial residual
+            r = sm.fit(z, w)                         # == gamlss.pb(., z, w)
+            residuals = r["residuals"]
+            s[:, j] = z - residuals
+            lam[j] = r["lambda"]
+            coef_smo[j] = r
+            deltaf += np.average((s[:, j] - old) ** 2, weights=w)
+            df[j] = r["nl_df"]
+        ratio = np.sqrt(deltaf / np.sum(w * s.sum(axis=1) ** 2))
+    out = dict(fit)
+    out["fitted.values"] = y - residuals
+    out["smooth"] = s
+    out["nl_df"] = float(np.nansum(df))
+    out["lambda"] = lam
+    out["coefSmo"] = coef_smo
+    return out
+
+
 # --------------------------------------------------------- param object
 class _ParamObject:
     """The R `get.object(what)` equivalent: per-parameter view of the
@@ -219,8 +269,14 @@ class _ParamObject:
 
 
 # ------------------------------------------------------------ glim fit
-def _glim_fit(f, X, y, w, fv, os, step, control, auto, gd_tol, family_type):
-    """Port of the inner glim.fit() of the RS algorithm."""
+def _glim_fit(f, X, y, w, fv, os, step, control, auto, gd_tol, family_type,
+              smoothers=None, who=None, s=None):
+    """Port of the inner glim.fit() of the RS algorithm.
+
+    When ``who`` is non-empty the linear-predictor fit is done by
+    backfitting (``additive_fit``) instead of a single weighted LS, and the
+    smoother contribution matrix ``s`` is carried in and out.
+    """
     cc = control["cc"]
     cyc = control["cyc"]
     trace = control["glm.trace"]
@@ -246,6 +302,7 @@ def _glim_fit(f, X, y, w, fv, os, step, control, auto, gd_tol, family_type):
     while abs(olddv - dv) > cc and itn < cyc:
         itn += 1
         lpold = lp
+        sold = s.copy() if who else None
         if np.any(np.isnan(wt)) or np.any(np.isnan(wv)):
             raise RuntimeError(
                 f"NA's in the working vector or weights for parameter {f.what}"
@@ -254,9 +311,17 @@ def _glim_fit(f, X, y, w, fv, os, step, control, auto, gd_tol, family_type):
             raise RuntimeError(
                 f"Inf values in the working vector or weights for parameter {f.what}"
             )
-        fit = lm_wfit(X, wv, wt * w)
-        lp = (fit["fitted.values"] if itn == 1
-              else step * fit["fitted.values"] + (1 - step) * lpold)
+        if who:
+            fit = additive_fit(X, wv, wt * w, s, smoothers,
+                               maxit=control["bf.cyc"], tol=control["bf.tol"])
+            lp = (fit["fitted.values"] if itn == 1
+                  else step * fit["fitted.values"] + (1 - step) * lpold)
+            s = (fit["smooth"] if itn == 1
+                 else step * fit["smooth"] + (1 - step) * sold)
+        else:
+            fit = lm_wfit(X, wv, wt * w)
+            lp = (fit["fitted.values"] if itn == 1
+                  else step * fit["fitted.values"] + (1 - step) * lpold)
         eta = lp + os
         fv = np.asarray(f.linkinv(eta), dtype=float)
         di = f.G_di(fv)
@@ -294,8 +359,9 @@ def _glim_fit(f, X, y, w, fv, os, step, control, auto, gd_tol, family_type):
             print(f"GLIM iteration {itn} for {f.what}: "
                   f"Global Deviance = {dv:.4f}")
 
+    pen = float(np.sum(eta * wt * (wv - eta))) if who else 0.0
     out = dict(fit if fit is not None else {})
-    out.update({"fv": fv, "wv": wv, "wt": wt, "eta": eta, "os": os, "pen": 0.0})
+    out.update({"fv": fv, "wv": wv, "wt": wt, "eta": eta, "os": os, "pen": pen})
     return out
 
 
@@ -341,9 +407,13 @@ def _rs_fit(setup, n_cyc=None, no_warn=True):
                     os=setup["offset"][what], step=steps[what],
                     control=i_control, auto=autostep, gd_tol=gd_tol,
                     family_type=family.type,
+                    smoothers=setup["smoothers"][what],
+                    who=setup["who"][what], s=setup["s"][what],
                 )
                 state[what] = fit["fv"]
                 fits[what] = fit
+                if setup["who"][what]:
+                    setup["s"][what] = fit["smooth"]  # carry across RS iters
         G_dev_old = G_dev
         G_dev = g_dev()
         it += 1
@@ -614,12 +684,18 @@ def gamlss(formula, sigma_formula="~1", nu_formula="~1", tau_formula="~1",
         if not isinstance(fx, (bool, np.bool_)):
             raise TypeError(f"{p}_fix should be logical True or False")
     state = {}
+    smoothers = {}      # {p: [PB, ...]} parallel to who[p] and s[p] columns
+    who = {}            # {p: [term label, ...]}
+    smooth_s = {}       # {p: N x len(who) matrix of smoother contributions}
     for p in PARAM_ORDER:
         if p not in family.parameters:
             continue
-        Xp, di = formulas[p].design(data)
+        Xp, di, sm_p = formulas[p].design(data)
         X[p] = Xp
         dinfos[p] = di
+        smoothers[p] = list(sm_p.values())
+        who[p] = list(sm_p.keys())
+        smooth_s[p] = np.zeros((N, len(sm_p)))
         offset[p] = formulas[p].offset(data, N)
         st = starts[p]
         if st is not None:
@@ -635,7 +711,13 @@ def gamlss(formula, sigma_formula="~1", nu_formula="~1", tau_formula="~1",
         "control": control, "i_control": i_control, "family": family,
         "state": state, "fits": {}, "y": y, "w": w, "bd": bd, "N": N,
         "X": X, "offset": offset, "fix": fix, "iter": 0,
+        "smoothers": smoothers, "who": who, "s": smooth_s,
     }
+    if any(who[p] for p in who) and not isinstance(method, RS):
+        raise NotImplementedError(
+            "Smoothers (pb/pbz) are currently only supported with method=RS(); "
+            "CG/mixed support is planned (Step 4)."
+        )
     if isinstance(method, RS):
         conv = _rs_fit(setup, n_cyc=method.n_cyc)
     elif isinstance(method, CG):
@@ -686,7 +768,7 @@ def gamlss(formula, sigma_formula="~1", nu_formula="~1", tau_formula="~1",
     for p in res.parameters:
         fitted_p = setup["fits"].get(p)
         if family.parameters[p] and not fix[p] and fitted_p is not None:
-            cn = r_colnames(dinfos[p])
+            cn = r_colnames(dinfos[p]) + setup["who"][p]
             setattr(res, f"{p}_fv", state[p])
             setattr(res, f"{p}_lp", fitted_p["eta"])
             setattr(res, f"{p}_wv", fitted_p["wv"])
@@ -699,9 +781,13 @@ def gamlss(formula, sigma_formula="~1", nu_formula="~1", tau_formula="~1",
             setattr(res, f"{p}_coefficients", coefs)
             setattr(res, f"{p}_offset", fitted_p["os"])
             setattr(res, f"{p}_formula", formulas[p].original)
-            setattr(res, f"{p}_df", float(fitted_p["rank"]))
-            setattr(res, f"{p}_nl_df", 0.0)
-            setattr(res, f"{p}_pen", 0.0)
+            nl_df_p = float(fitted_p.get("nl_df", 0.0))
+            setattr(res, f"{p}_df", float(fitted_p["rank"]) + nl_df_p)
+            setattr(res, f"{p}_nl_df", nl_df_p)
+            setattr(res, f"{p}_pen", float(fitted_p.get("pen", 0.0)))
+            if setup["who"][p]:
+                setattr(res, f"{p}_s", fitted_p.get("smooth"))
+                setattr(res, f"{p}_coefSmo", fitted_p.get("coefSmo"))
         else:
             setattr(res, f"{p}_fix", fix[p])
             setattr(res, f"{p}_df", 0.0)

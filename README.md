@@ -12,6 +12,7 @@ A Python port of the R packages **gamlss** (5.5-0) and **gamlss.dist**
 
 - [Pure Python](#pure-python)
 - [Status](#status)
+- [Changelog](#changelog)
 - [License and attribution](#license-and-attribution)
 - [Install](#install)
 - [Quick start](#quick-start)
@@ -46,6 +47,23 @@ but beyond that only some of the core functions have been manually
 tested; less-travelled code paths may still contain porting bugs.
 If a result matters, cross-check it against the original R package,
 and please report discrepancies via the issue tracker.
+
+## Changelog
+
+Full history in [`CHANGELOG.md`](CHANGELOG.md).
+
+**Latest (unreleased):** penalised B-spline smoothers **`pb()`** can now be
+used in model formulas and are fitted by backfitting within the RS
+algorithm, with ML or fixed-`lambda` smoothing — verified numerically
+against R (coefficients, per-smoother λ/edf, degrees of freedom, deviance
+and exact iteration count; see `tests/test_pb.py`):
+
+```python
+m = gl.gamlss("y ~ pb(x)", sigma_formula="~pb(x)", family=gl.NO(), data=ab)
+```
+
+Prediction for `pb` terms, the CG/mixed path, GAIC/GCV/`df` selection and
+further smoothers (`pbz`, `cs`, ...) are in progress.
 
 ## License and attribution
 
@@ -194,9 +212,13 @@ python -m pytest tests/ -q
 - Randomised quantile residuals for discrete families use NumPy's RNG;
   they match R distributionally, not bitwise (pass `rng=` for
   reproducibility).
-- Smoothing/additive terms (`pb()`, `cs()`, ...) are not ported yet —
-  the parametric GAMLSS core (formulas, all four parameters, RS/CG,
-  weights, offsets, factors) is complete.
+- Smoothing/additive terms: `pb()` (penalised B-splines) is now ported
+  for *fitting* with the RS algorithm (ML and fixed-`lambda`), verified
+  against R; prediction/`getSmo` for `pb`, the CG/mixed path, GAIC/GCV/`df`
+  selection and the other smoothers (`pbz`, `cs`, `ps`, ...) are still in
+  progress (see the [Changelog](CHANGELOG.md)). The parametric GAMLSS core
+  (formulas, all four parameters, RS/CG, weights, offsets, factors) is
+  complete.
 
 ## Layout
 

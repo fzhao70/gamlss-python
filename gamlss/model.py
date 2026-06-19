@@ -272,7 +272,7 @@ class GamlssResults:
         from .engine import lm_wfit
 
         pf = ParamFormula(getattr(self, f"{what}_formula"), combined)
-        X, di = pf.design(combined)
+        X, di, _smoothers = pf.design(combined)
         offsetVar = pf.offset(combined, len(combined))
         y_work = getattr(self, f"{what}_lp").copy()
         wt = getattr(self, f"{what}_wt")
