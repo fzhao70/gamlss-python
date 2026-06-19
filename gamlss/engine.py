@@ -480,6 +480,7 @@ def _cg_fit(setup, n_cyc=None):
     eta = {p: np.zeros(N) for p in PARAM_ORDER}
     eta_old = {p: np.zeros(N) for p in PARAM_ORDER}
     eta_s = {}
+    s_old = {p: setup["s"][p] for p in params}  # pre-update smooth (autostep)
     objs = {p: _ParamObject(family, p, y, bd, state) for p in params}
 
     while abs(G_dev_old - G_dev) > c_crit and it < n_cyc:
@@ -523,15 +524,26 @@ def _cg_fit(setup, n_cyc=None):
                     adj = adj + wcross[pair] * (eta[q] - eta_old[q])
                 adj = -adj / wpar[p]
                 wv = z[p] + adj
-                fit = lm_wfit(setup["X"][p], wv, wpar[p] * w)
-                eta[p] = fit["fitted.values"] + setup["offset"][p]
-                state[p] = np.asarray(family.linkinv(p)(eta[p]), float)
+                if setup["who"][p]:
+                    # one backfitting sweep per inner CG step (R: maxit=1)
+                    fit = additive_fit(setup["X"][p], wv, wpar[p] * w,
+                                       setup["s"][p], setup["smoothers"][p],
+                                       maxit=1, tol=i_control["bf.tol"])
+                    s_old[p] = setup["s"][p]
+                    setup["s"][p] = fit["smooth"]
+                    eta[p] = fit["fitted.values"] + setup["offset"][p]
+                    state[p] = np.asarray(family.linkinv(p)(eta[p]), float)
+                    fit["pen"] = float(np.sum(eta[p] * wpar[p] * (wv - eta[p])))
+                else:
+                    fit = lm_wfit(setup["X"][p], wv, wpar[p] * w)
+                    eta[p] = fit["fitted.values"] + setup["offset"][p]
+                    state[p] = np.asarray(family.linkinv(p)(eta[p]), float)
+                    fit["pen"] = 0.0
                 fit["eta"] = eta[p]
                 fit["fv"] = state[p]
                 fit["wv"] = wv
                 fit["wt"] = wpar[p]
                 fit["os"] = setup["offset"][p]
-                fit["pen"] = 0.0
                 fits[p] = fit
             G_dev_in = i_G_dev
             i_G_dev = g_dev()
@@ -553,6 +565,8 @@ def _cg_fit(setup, n_cyc=None):
                 for p in params:
                     eta[p] = (eta[p] + eta_old[p]) / 2
                     state[p] = np.asarray(family.linkinv(p)(eta[p]), float)
+                    if setup["who"][p]:
+                        setup["s"][p] = (setup["s"][p] + s_old[p]) / 2
                 G_dev = g_dev()
                 if G_dev < G_dev_old:
                     break
@@ -713,11 +727,6 @@ def gamlss(formula, sigma_formula="~1", nu_formula="~1", tau_formula="~1",
         "X": X, "offset": offset, "fix": fix, "iter": 0,
         "smoothers": smoothers, "who": who, "s": smooth_s,
     }
-    if any(who[p] for p in who) and not isinstance(method, RS):
-        raise NotImplementedError(
-            "Smoothers (pb/pbz) are currently only supported with method=RS(); "
-            "CG/mixed support is planned (Step 4)."
-        )
     if isinstance(method, RS):
         conv = _rs_fit(setup, n_cyc=method.n_cyc)
     elif isinstance(method, CG):

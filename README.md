@@ -63,9 +63,9 @@ m = gl.gamlss("y ~ pb(x)", sigma_formula="~pb(x)", family=gl.NO(), data=ab)
 ```
 
 Prediction on new data (`m.predict(newdata=...)`, `predictAll`) and
-`getSmo(m)` are supported too. The CG/mixed path, GAIC/GCV/`df` selection,
-term plots for smoothers, and further smoothers (`pbz`, `cs`, ...) are in
-progress.
+`getSmo(m)` are supported too, as are the `CG()` and `mixed()` algorithms.
+GAIC/GCV/`df` smoothing-parameter selection, term plots for smoothers, and
+further smoothers (`pbz`, `cs`, ...) are in progress.
 
 ## License and attribution
 
@@ -215,12 +215,15 @@ python -m pytest tests/ -q
   they match R distributionally, not bitwise (pass `rng=` for
   reproducibility).
 - Smoothing/additive terms: `pb()` (penalised B-splines) is now ported
-  for *fitting* with the RS algorithm (ML and fixed-`lambda`) plus
-  prediction on new data and `getSmo`, verified against R; the CG/mixed
-  path, GAIC/GCV/`df` selection, term plots, and the other smoothers
-  (`pbz`, `cs`, `ps`, ...) are still in progress (see the
-  [Changelog](CHANGELOG.md)). The parametric GAMLSS core (formulas, all
-  four parameters, RS/CG, weights, offsets, factors) is complete.
+  for *fitting* with the RS, CG and mixed algorithms (ML and fixed-`lambda`)
+  plus prediction on new data and `getSmo`, verified against R; GAIC/GCV/`df`
+  selection, term plots, and the other smoothers (`pbz`, `cs`, `ps`, ...)
+  are still in progress (see the [Changelog](CHANGELOG.md)). The parametric
+  GAMLSS core (formulas, all four parameters, RS/CG, weights, offsets,
+  factors) is complete. Note: because `pb(x)`'s linear column is concurve
+  with the smooth, an early-stopped `mixed` fit may split the x-effect
+  between the linear coefficient and the smooth differently from R; the
+  fitted model is identical.
 
 ## Layout
 

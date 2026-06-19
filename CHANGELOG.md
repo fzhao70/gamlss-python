@@ -49,12 +49,23 @@ with the original R package:
   against R for link/response predictions and `getSmo$fun(xeval)` to
   rtol 1e-6 (`tests/test_pb.py`).
 
+- **Step 4 — CG and mixed algorithms.** `pb()` now also fits under
+  `method=CG()` and `method=mixed()` (backfitting with one sweep per inner
+  CG step, plus the smooth in CG's step-halving), matching R's `CG`/`mixed`
+  fitting paths. Verified against R across CG with one or both parameters
+  smoothed, a parametric + smoothed-parameter mix, the GA (log) link, and
+  two smoothers in one parameter: `CG()` reproduces coefficients, λ/edf, df,
+  deviance and predictions to rtol 1e-6.
+  Note: the linear column of `pb(x)` is concurve with the smooth, so for an
+  early-stopped `mixed` fit the *split* of the x-effect into a parametric
+  coefficient vs the smooth is not identifiable and can differ from R, even
+  though the fitted model (fitted values, deviance, df, edf, λ) is identical
+  to ~1e-14.
+
 ### Not yet supported (planned)
 
 - Term plots / `lpred(type="terms")` for `pb()` terms — currently raises
   `NotImplementedError` (*Step 3 follow-up*).
-- `pb()` with the CG / mixed algorithms (currently raises
-  `NotImplementedError`) — *Step 4*.
 - `pb()` smoothing-parameter selection by GAIC / GCV / fixed `df`
   (only ML and fixed `lambda` are available so far) — *Step 5*.
 - `pbz()` (shrink-to-zero P-splines) and other smoothers

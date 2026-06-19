@@ -111,6 +111,44 @@ record_pb("pb_sim_mix", m, sd,
 add_pred("pb_sim_mix", m, sdf,
          data.frame(z = c(-1.2, 0.0, 1.1), x1 = c(0.15, 0.5, 0.85)))
 
+## ---- CG and mixed algorithms with smoothers in mu and sigma ----
+m <- gamlss(y ~ pb(x), sigma.formula = ~pb(x), family = NO, data = abdom,
+            method = CG(), control = ctrl)
+record_pb("pb_abdom_cg", m, ad,
+          list(family = "NO", formula = "y ~ pb(x)",
+               sigma_formula = "~pb(x)", method = "CG"))
+add_pred("pb_abdom_cg", m, abdom, data.frame(x = newx), smo_fun_x = newx)
+
+m <- gamlss(y ~ pb(x), sigma.formula = ~pb(x), family = NO, data = abdom,
+            method = mixed(2, 20), control = ctrl)
+record_pb("pb_abdom_mixed", m, ad,
+          list(family = "NO", formula = "y ~ pb(x)",
+               sigma_formula = "~pb(x)", method = "mixed"))
+# mixed split is non-identifiable, but the total prediction is not:
+add_pred("pb_abdom_mixed", m, abdom, data.frame(x = newx))
+
+## CG with a single smoother (mu) and a parametric sigma -- asymmetric coupling
+m <- gamlss(y ~ pb(x), sigma.formula = ~x, family = NO, data = abdom,
+            method = CG(), control = ctrl)
+record_pb("pb_abdom_mu_cg", m, ad,
+          list(family = "NO", formula = "y ~ pb(x)",
+               sigma_formula = "~x", method = "CG"))
+add_pred("pb_abdom_mu_cg", m, abdom, data.frame(x = newx), smo_fun_x = newx)
+
+## CG with a non-identity (log) link
+m <- gamlss(y ~ pb(x), family = GA, data = abdom, method = CG(), control = ctrl)
+record_pb("pb_abdom_ga_cg", m, ad,
+          list(family = "GA", formula = "y ~ pb(x)", method = "CG"))
+add_pred("pb_abdom_ga_cg", m, abdom, data.frame(x = newx), smo_fun_x = newx)
+
+## CG with two smoothers in one parameter (backfitting maxit=1 over both)
+m <- gamlss(y ~ pb(x1) + pb(x2), family = NO, data = sdf, method = CG(),
+            control = ctrl)
+record_pb("pb_sim_two_cg", m, sd,
+          list(family = "NO", formula = "y ~ pb(x1) + pb(x2)", method = "CG"))
+add_pred("pb_sim_two_cg", m, sdf,
+         data.frame(x1 = c(0.15, 0.5, 0.85), x2 = c(0.25, 0.6, 0.9)))
+
 write_json(cases, "tests/reference/pb_fits.json", digits = NA,
            auto_unbox = TRUE, na = "string")
 cat("WROTE tests/reference/pb_fits.json with", length(cases), "cases:\n")
