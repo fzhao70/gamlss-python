@@ -41,9 +41,18 @@ with the original R package:
   and the **exact RS iteration count** all matching to rtol 1e-6
   (`tests/test_pb.py`, reference `r-scripts/gen_pb_reference.R`).
 
+- **Step 3 — prediction and `getSmo()`.** `getSmo(m, "mu")` returns the
+  fitted smoother (carrying its natural-spline `fun`, plus `coef`, `lambda`,
+  `edf`, `fv`, `knots`); `predict(newdata=...)` and `predictAll()` now add
+  each smoother's `fun(xeval)` — a natural cubic spline through the fitted
+  values, as in R's `predict.gamlss` — to the linear predictor. Verified
+  against R for link/response predictions and `getSmo$fun(xeval)` to
+  rtol 1e-6 (`tests/test_pb.py`).
+
 ### Not yet supported (planned)
 
-- Prediction, `getSmo()` and term plots for `pb()` terms — *Step 3*.
+- Term plots / `lpred(type="terms")` for `pb()` terms — currently raises
+  `NotImplementedError` (*Step 3 follow-up*).
 - `pb()` with the CG / mixed algorithms (currently raises
   `NotImplementedError`) — *Step 4*.
 - `pb()` smoothing-parameter selection by GAIC / GCV / fixed `df`

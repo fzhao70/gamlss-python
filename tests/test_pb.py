@@ -103,3 +103,54 @@ def test_pb_fit_matches_r(name):
             np.testing.assert_allclose([c["edf"] for c in cs],
                                        ref[f"edf.{p}"], rtol=1e-6,
                                        err_msg=f"{p} smoother edf")
+
+
+@pytest.mark.parametrize("name", [n for n in NAMES if "pred.newdata" in PB[n]])
+def test_pb_predict_matches_r(name):
+    """getSmo() spline + predict() on new data, vs R predict.gamlss.
+
+    Covers single smoother (mu), smoothers in mu+sigma, two smoothers in
+    one parameter, and a parametric + smoother mix.
+    """
+    ref = PB[name]
+    m = get_fit(name)
+    nd = pd.DataFrame({k: np.asarray(v, dtype=float)
+                       for k, v in ref["pred.newdata"].items()})
+
+    # getSmo(m, "mu")$fun must reproduce R's natural spline (single-smoother
+    # mu cases, where a 1-D x grid is well defined)
+    if "getSmo.fun.mu" in ref:
+        sm = m.getSmo("mu")
+        np.testing.assert_allclose(sm["fun"](nd["x"].to_numpy()),
+                                   ref["getSmo.fun.mu"], rtol=1e-6, atol=1e-7,
+                                   err_msg="getSmo$fun(xeval)")
+
+    # full prediction (parametric + every smoother) on new data
+    for p in m.parameters:
+        np.testing.assert_allclose(
+            m.predict(what=p, newdata=nd, type="link"),
+            ref[f"pred.link.{p}"], rtol=1e-6, atol=1e-7,
+            err_msg=f"predict link {p}")
+        np.testing.assert_allclose(
+            m.predict(what=p, newdata=nd, type="response"),
+            ref[f"pred.resp.{p}"], rtol=1e-6, atol=1e-7,
+            err_msg=f"predict response {p}")
+
+
+def test_pb_getsmo_indexing_and_terms_guard():
+    """getSmo() indexing (1-based, which=0 -> list) and the terms guard."""
+    m = get_fit("pb_sim_two")          # mu has two smoothers: pb(x1), pb(x2)
+    allsmo = m.getSmo("mu", which=0)
+    assert isinstance(allsmo, list) and len(allsmo) == 2
+    assert m.getSmo("mu", which=1) is allsmo[0]
+    assert m.getSmo("mu", which=2) is allsmo[1]
+    assert m.getSmo(parameter="mu", which=1) is allsmo[0]
+    with pytest.raises(ValueError):    # sigma has no smoother here
+        m.getSmo("sigma")
+    # type="terms" with smoothers is not supported yet -> explicit error,
+    # rather than silently dropping the smooth term
+    with pytest.raises(NotImplementedError):
+        m.lpred(what="mu", type="terms")
+    with pytest.raises(NotImplementedError):
+        m.predict(what="mu", newdata=pd.DataFrame({"x1": [0.3], "x2": [0.4]}),
+                  type="terms")

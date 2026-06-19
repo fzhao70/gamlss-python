@@ -50,6 +50,22 @@ record_pb <- function(name, m, data, spec) {
 }
 
 ctrl <- gamlss.control(trace = FALSE, n.cyc = 200)
+newx <- c(15.5, 20.0, 25.3, 33.7, 40.0)  # mix of on-grid and between-grid x
+
+## prediction + getSmo references attached to an already-recorded case.
+## nd: a newdata data.frame; smo_fun_x: x grid for getSmo(m,"mu")$fun
+## (only meaningful when mu has a single smoother).
+add_pred <- function(name, m, data, nd, smo_fun_x = NULL) {
+  cases[[name]]$pred.newdata <<- lapply(as.list(nd), num)
+  for (p in m$parameters) {
+    cases[[name]][[paste0("pred.link.", p)]] <<-
+      num(predict(m, what = p, newdata = nd, data = data, type = "link"))
+    cases[[name]][[paste0("pred.resp.", p)]] <<-
+      num(predict(m, what = p, newdata = nd, data = data, type = "response"))
+  }
+  if (!is.null(smo_fun_x))
+    cases[[name]]$getSmo.fun.mu <<- num(getSmo(m, "mu")$fun(smo_fun_x))
+}
 
 ## ---- single-predictor real data: abdom (n=610, inter=20 unclamped) ----
 data(abdom)
@@ -57,6 +73,7 @@ ad <- list(x = abdom$x, y = abdom$y)
 
 m <- gamlss(y ~ pb(x), family = NO, data = abdom, control = ctrl)
 record_pb("pb_abdom", m, ad, list(family = "NO", formula = "y ~ pb(x)"))
+add_pred("pb_abdom", m, abdom, data.frame(x = newx), smo_fun_x = newx)
 
 m <- gamlss(y ~ pb(x), family = GA, data = abdom, control = ctrl)
 record_pb("pb_abdom_ga", m, ad, list(family = "GA", formula = "y ~ pb(x)"))
@@ -66,6 +83,7 @@ m <- gamlss(y ~ pb(x), sigma.formula = ~pb(x), family = NO, data = abdom,
 record_pb("pb_abdom_both", m, ad,
           list(family = "NO", formula = "y ~ pb(x)",
                sigma_formula = "~pb(x)"))
+add_pred("pb_abdom_both", m, abdom, data.frame(x = newx), smo_fun_x = newx)
 
 m <- gamlss(y ~ pb(x, lambda = 100), family = NO, data = abdom, control = ctrl)
 record_pb("pb_abdom_fixlam", m, ad,
@@ -84,10 +102,14 @@ sdf <- data.frame(x1 = x1, x2 = x2, z = z, y = ys)
 m <- gamlss(y ~ pb(x1) + pb(x2), family = NO, data = sdf, control = ctrl)
 record_pb("pb_sim_two", m, sd,
           list(family = "NO", formula = "y ~ pb(x1) + pb(x2)"))
+add_pred("pb_sim_two", m, sdf,
+         data.frame(x1 = c(0.15, 0.5, 0.85), x2 = c(0.25, 0.6, 0.9)))
 
 m <- gamlss(y ~ z + pb(x1), family = NO, data = sdf, control = ctrl)
 record_pb("pb_sim_mix", m, sd,
           list(family = "NO", formula = "y ~ z + pb(x1)"))
+add_pred("pb_sim_mix", m, sdf,
+         data.frame(z = c(-1.2, 0.0, 1.1), x1 = c(0.15, 0.5, 0.85)))
 
 write_json(cases, "tests/reference/pb_fits.json", digits = NA,
            auto_unbox = TRUE, na = "string")

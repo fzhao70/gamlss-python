@@ -17,9 +17,22 @@ from __future__ import annotations
 import math
 
 import numpy as np
+from scipy.interpolate import CubicSpline
 
 # R's qr/svd rank tolerance: .Machine$double.eps^0.8
 _EPS_08 = float(np.finfo(float).eps) ** 0.8
+
+
+def _natural_spline(x, fv):
+    """R's ``splinefun(x, fv, method="natural")`` for pb prediction.
+
+    A natural cubic spline through the fitted smoother values; used by
+    predict() to evaluate the smooth at new x.  Ties in x map to identical
+    fv (the fit is a function of x), so duplicates are dropped.
+    """
+    xu, idx = np.unique(np.asarray(x, dtype=float), return_index=True)
+    return CubicSpline(xu, np.asarray(fv, dtype=float)[idx],
+                       bc_type="natural", extrapolate=True)
 
 
 # --------------------------------------------------------------- basis
@@ -169,6 +182,7 @@ class PB:
 
         return {
             "fitted.values": fv,
+            "fv": fv,                     # R coefSmo$fv alias
             "residuals": y - fv,
             "nl_df": edf - 2,
             "lambda": lam,
@@ -177,4 +191,7 @@ class PB:
             "sig2": sig2,
             "tau2": tau2,
             "knots": self.knots,
+            "name": self.name,            # smoothed-variable expression
+            "x": self.x,                  # training x (for the spline)
+            "fun": _natural_spline(self.x, fv),  # predict: fun(xeval)
         }
