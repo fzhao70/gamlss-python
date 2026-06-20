@@ -45,9 +45,18 @@ with the original R package:
   fitted smoother (carrying its natural-spline `fun`, plus `coef`, `lambda`,
   `edf`, `fv`, `knots`); `predict(newdata=...)` and `predictAll()` now add
   each smoother's `fun(xeval)` — a natural cubic spline through the fitted
-  values, as in R's `predict.gamlss` — to the linear predictor. Verified
-  against R for link/response predictions and `getSmo$fun(xeval)` to
-  rtol 1e-6 (`tests/test_pb.py`).
+  values, as in R's `predict.gamlss` — to the linear predictor. The smooth
+  extrapolates *linearly* beyond the data range, matching R's
+  `splinefun(method="natural")` (scipy's `CubicSpline` would extend the
+  boundary cubic and diverge sharply — e.g. the wrong sign far outside the
+  range). Verified against R for link/response predictions and
+  `getSmo$fun(xeval)`, including extrapolation, to rtol 1e-6
+  (`tests/test_pb.py`). Edge cases also covered: small n (R's `inter→10`
+  clamp), prior weights including zeros (`N = sum(w≠0)`), `df` larger than
+  the basis (R caps to 3), and too few distinct x — ML still fits the
+  rank-deficient basis (SVD regpen), while df/GCV selection on it now raises
+  a clear "B-basis is singular" error as R does, instead of silently
+  returning a degenerate fit.
 
 - **Step 4 — CG and mixed algorithms.** `pb()` now also fits under
   `method=CG()` and `method=mixed()` (backfitting with one sweep per inner
@@ -62,12 +71,33 @@ with the original R package:
   though the fitted model (fitted values, deviance, df, edf, λ) is identical
   to ~1e-14.
 
+- **Step 5 — GAIC / GCV / `df` / `max.df` smoothing-parameter selection.**
+  Beyond ML and a fixed `lambda`, `pb()` now supports `pb(x, df=5)` (target
+  effective df, R `uniroot`), `pb(x, max.df=8)` (cap), `pb(x, method="GAIC",
+  k=2)` and `pb(x, method="GCV")`. GAIC mirrors R's `nlminb` as a *local*
+  search from the warm-start λ (a global search lands on a different optimum
+  of the often-flat GAIC objective). df/max.df and GCV match R to ~1e-6 on
+  edf/fitted/deviance (~3e-5 on the flat λ itself) rather than the ~1e-13 of
+  ML and fixed-λ. **GAIC parity is not guaranteed:** when the GAIC objective
+  is flat/multimodal, scipy's optimiser and R's `nlminb` can descend to
+  different optima (e.g. with `k=4` R stops at λ=1e7/edf=2 while the port
+  finds a lower-GAIC interior optimum, changing the iteration count). Both
+  are valid GAIC-selected smooths; if exact R agreement matters, prefer ML,
+  GCV, a fixed `df`, or a fixed `lambda`. Verified against R for selection
+  in mu and sigma, under RS and CG, with single and multiple smoothers, and
+  the inactive-`max.df` fallback to bit-exact ML; df selection is also
+  checked independently (the fitted nl.df equals the requested df). Under
+  CG/mixed the deterministic selectors match R (fixed `lambda` under CG is
+  bit-exact; `df` under CG and under `mixed` match), but the optimiser-based
+  ones are more sensitive there: CG's single-sweep backfitting amplifies the
+  optimiser difference (GCV under CG drifts ~1e-4 with a different iteration
+  count) and `max.df` under CG may not converge in R, so prefer RS for
+  GCV / GAIC / `max.df`.
+
 ### Not yet supported (planned)
 
 - Term plots / `lpred(type="terms")` for `pb()` terms — currently raises
   `NotImplementedError` (*Step 3 follow-up*).
-- `pb()` smoothing-parameter selection by GAIC / GCV / fixed `df`
-  (only ML and fixed `lambda` are available so far) — *Step 5*.
 - `pbz()` (shrink-to-zero P-splines) and other smoothers
   (`cs`, `ps`, `ri`, `random`, ...) — *Step 6+*.
 
