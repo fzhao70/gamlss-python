@@ -7,7 +7,9 @@ README for the verification methodology).
 
 ## [Unreleased]
 
-### Added — penalised B-spline smoothers `pb()` (in progress)
+## [0.2.0] - 2026-06-19
+
+### Added — penalised B-spline smoothers `pb()`
 
 Model formulas may now contain `pb()` terms, e.g.
 
