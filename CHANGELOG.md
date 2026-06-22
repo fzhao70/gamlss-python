@@ -7,6 +7,58 @@ README for the verification methodology).
 
 ## [Unreleased]
 
+### Added — shrink-to-zero P-spline smoother `pbz()`
+
+Model formulas may now contain `pbz()` terms, e.g.
+
+```python
+m = gl.gamlss("y ~ pbz(x)", family=gl.NO(), data=ab)
+```
+
+`pbz()` (Durbán's double-penalty P-spline, `pb_goingtozero.R`) is `pb()`
+plus a *second*, order-1 difference penalty that activates only when the
+fit collapses to `edf ≤ lim`: the usual order-2 penalty shrinks the smooth
+toward a straight *line*, and the extra order-1 penalty then shrinks it
+toward a *constant* (a zero effect), so a term can drop out — useful for
+model selection. It reuses the entire `pb()` machinery (basis, SVD
+`regpen`, backfitting, `getSmo`/`predict`); the differences faithful to R
+are that `pbz(x)` contributes a column of **zeros** (not the linear `x`) to
+the parametric design, its non-linear df is `edf − 1` (not `edf − 2`), and
+a warm-started `λ` that hits the `1e7` rail flips the fit to fixed-`λ` mode
+and drops the order-1 penalty (R's start-value quirk, `pbz.R:223,237-242`).
+
+Verified against R on ML and fixed-`λ` fits — basic and double-penalty-active
+(pure-noise and strongly-linear data that shrink to a constant), `NO`/`GA`
+links, `mu` and `sigma`, two smoothers, parametric + smoother mixes, and
+under `CG()` — reproducing coefficients (including the aliased `NA`/`NaN`
+column), per-smoother λ/edf, df, deviance/AIC/SBC, fitted values, predictions
+and the exact iteration count (bit-exact ML/fixed-λ; rtol 1e-6 overall;
+`tests/test_pbz.py`, reference `r-scripts/gen_pbz_reference.R`).
+
+**Only ML (default) and a fixed `lambda` are supported.** R gamlss 5.5-0's
+`gamlss.pbz()` is broken for `df` / `GAIC` / `GCV`: its inner `regpen()` is
+defined as `function(y, X, w)` but those branches call it as
+`regpen(y, X, w, lambda)`, so R aborts with `"unused argument (lambda)"`.
+There is therefore no reference behaviour to match, and `pbz(df=…)`,
+`pbz(method="GAIC")` and `pbz(method="GCV")` raise a clear
+`NotImplementedError` (use `pb()` for those selectors).
+
+Coverage was hardened by differential fuzzing — ~40 `pbz`/`pb` configurations
+fit in both R and the port on byte-identical data and compared — exercising
+the order-1 penalty at an *interior* fixed point (`lim=10`) and railed to a
+constant, in `mu`/`sigma`/`nu` (incl. a 3-parameter `BCCG` fit), under
+`RS`/`CG`/`mixed`, with weights, few-distinct-`x`, multiple smoothers and
+`pbz`+`pb` mixes. Under `mixed`, the intercept↔smooth-mean split is
+non-identifiable (as for `pb`) but every identifiable quantity — fitted
+values, deviance, df, edf, λ and predictions — matches R.
+
+### Fixed
+
+- Smoother term labels now match R's `deparse` of numeric literals: a value
+  like `lambda = 1000000` is rendered `lambda = 1e+06` (scientific notation
+  when strictly shorter than fixed, 15 significant digits), so `pb()`/`pbz()`
+  coefficient names are byte-identical to R for large/small λ.
+
 ## [0.2.0] - 2026-06-19
 
 ### Added — penalised B-spline smoothers `pb()`
@@ -98,10 +150,9 @@ with the original R package:
 
 ### Not yet supported (planned)
 
-- Term plots / `lpred(type="terms")` for `pb()` terms — currently raises
-  `NotImplementedError` (*Step 3 follow-up*).
-- `pbz()` (shrink-to-zero P-splines) and other smoothers
-  (`cs`, `ps`, `ri`, `random`, ...) — *Step 6+*.
+- Term plots / `lpred(type="terms")` for `pb()` / `pbz()` terms — currently
+  raises `NotImplementedError` (*Step 3 follow-up*).
+- Other smoothers (`cs`, `ps`, `ri`, `random`, ...).
 
 ## [0.1.0]
 

@@ -66,8 +66,14 @@ Prediction on new data (`m.predict(newdata=...)`, `predictAll`) and
 `getSmo(m)` are supported too, as are the `CG()` and `mixed()` algorithms
 and all of R's smoothing-parameter selection methods (`pb(x, df=5)`,
 `max.df`, `method="GAIC"`, `method="GCV"`, fixed `lambda`, or ML by default).
-Term plots for smoothers and further smoothers (`pbz`, `cs`, ...) are in
-progress.
+
+The shrink-to-zero variant **`pbz()`** is also available (a second, order-1
+penalty pulls the smooth toward a constant when it has no real signal, so a
+term can drop out), with ML or fixed-`lambda` smoothing verified against R
+(`tests/test_pbz.py`). Its `df` / `GAIC` / `GCV` selectors are intentionally
+rejected because R gamlss 5.5-0's `pbz()` itself aborts on them (an upstream
+bug); use `pb()` for those. Term plots for smoothers and further smoothers
+(`cs`, `ps`, ...) are in progress.
 
 ## License and attribution
 
@@ -86,6 +92,16 @@ If you use GAMLSS in published work, please cite:
 > Rigby, R. A. and Stasinopoulos, D. M. (2005). Generalized additive
 > models for location, scale and shape (with discussion).
 > *Applied Statistics*, 54, 507-554.
+
+If you use this library, please also acknowledge this repository, for
+example:
+
+> gamlss-python contributors (2026). *gamlss-python: A Python
+> translation of the GAMLSS R packages.*
+> https://github.com/fzhao70/gamlss-python
+
+Thanks to all the users of this library for their interest, feedback,
+and contributions.
 
 ## Install
 
@@ -219,8 +235,10 @@ python -m pytest tests/ -q
 - Smoothing/additive terms: `pb()` (penalised B-splines) is ported for
   fitting with the RS, CG and mixed algorithms, all smoothing-parameter
   selection methods (ML, fixed `lambda`, `df`, `max.df`, GAIC, GCV), plus
-  prediction on new data and `getSmo`, verified against R; term plots and
-  the other smoothers (`pbz`, `cs`, `ps`, ...) are still in progress (see
+  prediction on new data and `getSmo`, verified against R. The shrink-to-zero
+  `pbz()` variant is ported for ML and fixed-`lambda` (its `df`/GAIC/GCV
+  selectors are rejected — R 5.5-0's `pbz()` aborts on them); term plots and
+  the other smoothers (`cs`, `ps`, ...) are still in progress (see
   the [Changelog](CHANGELOG.md)). ML and fixed-`lambda` match R to ~1e-13;
   `df`/`max.df` (via `uniroot`) and GCV match to ~1e-6. GAIC parity is not
   guaranteed — on a flat/multimodal GAIC objective scipy's optimiser and R's
