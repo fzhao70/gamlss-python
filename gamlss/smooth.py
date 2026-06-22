@@ -6,10 +6,15 @@ Port of the R gamlss smoother machinery:
 - ``PB``         : the pb() term object + its gamlss.pb() fitting method,
                    including ``regpen`` (SVD penalised least squares) and the
                    ML smoothing-parameter loop,                          pb.R:166-209
+- ``PBZ``        : the pbz() term object + gamlss.pbz() (pb_goingtozero.R).
+                   A pb() with a *second*, order-1 penalty that activates when
+                   the fit collapses to ``edf <= lim``, shrinking the smooth
+                   toward a constant (zero effect) -- Durban's double penalty,
+                   for model selection.
 
-The class is deliberately a *pure function of* ``(x, control)`` for construction
-and ``(y, w)`` for fitting, so it can be unit-tested in isolation before being
-wired into the backfitting/engine machinery.
+The classes are deliberately a *pure function of* ``(x, control)`` for
+construction and ``(y, w)`` for fitting, so they can be unit-tested in
+isolation before being wired into the backfitting/engine machinery.
 """
 
 from __future__ import annotations
@@ -317,4 +322,224 @@ class PB:
             "name": self.name,            # smoothed-variable expression
             "x": self.x,                  # training x (for the spline)
             "fun": _natural_spline(self.x, fv),  # predict: fun(xeval)
+        }
+
+
+# ---------------------------------------------------------- pbz object
+class PBZ(PB):
+    """A "going-to-zero" penalised B-spline (R's ``pbz()`` + ``gamlss.pbz()``).
+
+    Construction and fitting mirror ``pb_goingtozero.R``.  ``pbz`` is ``pb``
+    with a *second* order-1 difference penalty ``D1``: after the usual
+    order-2 fit, if the effective df collapses to ``edf <= lim`` the order-1
+    penalty is stacked on as well, pulling the smooth toward a constant
+    (i.e. a zero effect) rather than merely toward a straight line.  This
+    lets the term drop out for model selection (Durban's idea, imitating
+    ``gam()``'s selection).
+
+    Only **ML** (the default) and a **fixed ``lambda``** are supported: R
+    gamlss 5.5-0's ``gamlss.pbz()`` aborts for ``df`` / ``GAIC`` / ``GCV``
+    selection (its inner ``regpen()`` is called with a ``lambda`` argument it
+    does not accept), so there is no reference behaviour to match -- the
+    constructor raises ``NotImplementedError`` for those.  Use :class:`PB`
+    (``pb()``) if you need df/GAIC/GCV selection.
+
+    Differences from :class:`PB` that matter for parity:
+
+    - two smoothing parameters (``lambda`` for ``D``, ``lambda2`` for ``D1``);
+      default ``start = (1e-4, 1e-4)``;
+    - the order-1 penalty only enters when ``edf <= lim`` (``pbz.R:155``);
+    - the ML loop updates *both* lambdas when that branch is active
+      (``pbz.R:261-292``);
+    - a warm-started ``lambda`` at the 1e7 rail flips the fit to fixed-lambda
+      mode and drops the order-1 penalty (``pbz.R:223,237-242``);
+    - the term contributes a column of **zeros** to the parametric design
+      (``pbz.R:89``), not the linear ``x`` -- handled by the formula layer;
+    - ``nl_df = edf - 1`` (``pbz.R:349``), versus ``edf - 2`` for ``pb``;
+    - there is no ``max.df`` for ``pbz``.
+    """
+
+    def __init__(self, x, df=None, lambda_=None, *,
+                 inter=20, degree=3, order=2, start=(1e-4, 1e-4),
+                 method="ML", k=2, lim=3):
+        # R gamlss 5.5-0's gamlss.pbz() is BROKEN for df / GAIC / GCV: its
+        # inner regpen() is defined as function(y, X, w) but those three
+        # branches call regpen(y, X, w, lambda), so R aborts with
+        # "unused argument (lambda)".  Only ML (default) and a fixed lambda
+        # actually run.  We therefore reject the broken selectors rather than
+        # silently diverge from a reference R cannot produce.  (pb() supports
+        # all of them; use pb() if you need df/GAIC/GCV selection.)
+        if df is not None:
+            raise NotImplementedError(
+                "pbz(df=...) is unavailable: R gamlss 5.5-0's pbz() aborts on "
+                "df selection (an upstream regpen() argument bug), so there is "
+                "no reference behaviour to match. Use method='ML' (default), a "
+                "fixed lambda=, or pb(x, df=...) instead.")
+        if method != "ML":
+            raise NotImplementedError(
+                f"pbz(method={method!r}) is unavailable: R gamlss 5.5-0's "
+                "pbz() aborts on GAIC/GCV (an upstream regpen() argument bug), "
+                "so there is no reference behaviour to match. Use method='ML' "
+                "(default), a fixed lambda=, or pb(x, method=...) instead.")
+        # pbz.control clamps order to >= 2 (pbz.R:117-119)
+        if order < 2:
+            warnings.warn("the value of order supplied is less than 2 the "
+                          "default value of 2 was used instead")
+            order = 2
+        if np.isscalar(start):
+            start = (float(start), float(start))
+        # reuse PB construction (basis, clamps, D, df handling)
+        super().__init__(x, df=df, lambda_=lambda_, max_df=None,
+                         inter=inter, degree=degree, order=order,
+                         start=start[0], method=method, k=k)
+        r = self.X.shape[1]
+        self.D1 = _penalty(r, 1)            # order-1 penalty, pbz.R:60
+        self.lambda_start = float(start[0])
+        self.lambda2_start = float(start[1])
+        # control$start[2] is *re-read* on every gamlss.pbz call (pbz.R:223),
+        # so a warm-started lambda2 is only used in the estimate branch; the
+        # fixed-lambda branch always falls back to this control default.
+        self._lambda2_control = float(start[1])
+        self.lim = lim
+
+    # -- double-penalty regpen (pbz.R:137-179) ---------------------------
+    def _regpen_z(self, Rmat, Qy, lam, lam2, p):
+        """SVD penalised LS with the conditional order-1 penalty.
+
+        Fit first with the order-2 penalty only; if the effective df is
+        ``<= lim`` refit with ``[R; sqrt(lam) D; sqrt(lam2) D1]`` and also
+        report ``df1``/``df2`` (the order-2-only and order-1-only df at the
+        combined rank), which drive the two-lambda ML update.
+        """
+        D, D1 = self.D, self.D1
+        RD = np.vstack([Rmat, math.sqrt(lam) * D])
+        U, d, Vt = np.linalg.svd(RD, full_matrices=False)
+        rank = int(np.sum(d > d.max() * _EPS_08))
+        U1 = U[:p, :rank]
+        beta = Vt.T[:, :rank] @ ((U1.T @ Qy) / d[:rank])
+        edf = float(np.sum(U1 * U1))
+        df1 = df2 = 0.0
+        do1order = False
+        if edf <= self.lim:                 # the cut-off, pbz.R:155
+            RD = np.vstack([Rmat, math.sqrt(lam) * D, math.sqrt(lam2) * D1])
+            RD1 = np.vstack([Rmat, math.sqrt(lam) * D])
+            RD2 = np.vstack([Rmat, math.sqrt(lam2) * D1])
+            U, d, Vt = np.linalg.svd(RD, full_matrices=False)
+            U_1 = np.linalg.svd(RD1, full_matrices=False)[0]
+            U_2 = np.linalg.svd(RD2, full_matrices=False)[0]
+            rank = int(np.sum(d > d.max() * _EPS_08))
+            U1 = U[:p, :rank]
+            beta = Vt.T[:, :rank] @ ((U1.T @ Qy) / d[:rank])
+            edf = float(np.sum(U1 * U1))
+            # df1/df2 slice the SAME combined rank (pbz.R:170-171)
+            U1_1, U1_2 = U_1[:p, :rank], U_2[:p, :rank]
+            df1 = float(np.sum(U1_1 * U1_1))
+            df2 = float(np.sum(U1_2 * U1_2))
+            do1order = True
+        return beta, edf, df1, df2, do1order
+
+    @staticmethod
+    def _clamp(lam):
+        if lam < 1e-7:
+            return 1e-7
+        if lam > 1e7:
+            return 1e7
+        return lam
+
+    def fit(self, y, w):
+        """Fit the pbz smoother to working response ``y`` with weights ``w``.
+
+        Port of gamlss.pbz (pb_goingtozero.R:130-351), restricted to the two
+        selectors R 5.5-0 can actually run: ML (default) and a fixed
+        ``lambda``.  The order-1 penalty is switched in by :meth:`_regpen_z`
+        whenever the fit reaches ``edf <= lim``; once the warm-started lambda
+        hits the 1e7 rail the fit flips to fixed-lambda mode (see below).
+        """
+        y = np.asarray(y, dtype=float)
+        w = np.asarray(w, dtype=float)
+        X, D, D1 = self.X, self.D, self.D1
+        order = self.order
+        N = int(np.sum(w != 0))                         # pbz.R:225
+        p = D.shape[1]
+
+        sw = np.sqrt(w)
+        Q, Rmat = np.linalg.qr(X * sw[:, None])
+        Qy = Q.T @ (sw * y)
+
+        tau2 = sig2 = tau2_2 = None
+        # lambda2 defaults to the control start each call (pbz.R:223); the
+        # estimate branch overrides it with the warm-started value (pbz.R:251).
+        lam2 = self._lambda2_control
+        # Warm-start rail handling (pbz.R:237-240): a *persisted* lambda at the
+        # 1e7/1e-7 rail flips the fit into fixed-lambda mode (it makes the local
+        # ``lambda`` non-NULL -> case 1), and the rails likewise pin lambda2.
+        # This is the mechanism by which a smooth that maxes out its order-2
+        # penalty (edf -> ~2) drops the order-1 penalty and settles at edf~2
+        # rather than continuing toward a constant.
+        lam_fixed = self.lambda_
+        if self.lambda_start >= 1e7:
+            lam_fixed = 1e7
+        elif self.lambda_start <= 1e-7:
+            lam_fixed = 1e-7
+        if self.lambda2_start >= 1e7:
+            lam2 = 1e7
+        elif self.lambda2_start <= 1e-7:
+            lam2 = 1e-7
+
+        if lam_fixed is None:
+            # CASE 2: estimate by ML (the only working selector; pbz.R:256-292).
+            lam = self.lambda_start          # not at a rail in this branch
+            lam2 = self.lambda2_start        # warm-started lambda2, pbz.R:251
+            for _ in range(50):              # two-lambda ML loop
+                beta, edf, df1, df2, do1order = self._regpen_z(
+                    Rmat, Qy, lam, lam2, p)
+                fv = X @ beta
+                sig2 = float(np.sum(w * (y - fv) ** 2) / (N - edf))
+                if do1order:
+                    gamma = D @ beta
+                    gamma2 = D1 @ beta
+                    tau2 = float(np.sum(gamma ** 2) / (df1 - 1))
+                    tau2_2 = float(np.sum(gamma2 ** 2) / (df2 - 1))
+                    if tau2 < 1e-7:
+                        tau2 = 1e-7
+                    if tau2_2 < 1e-7:
+                        tau2_2 = 1e-7
+                    lam_old = lam
+                    lam = self._clamp(sig2 / tau2)
+                    lam2 = self._clamp(sig2 / tau2_2)
+                else:
+                    gamma = D @ beta
+                    tau2 = float(np.sum(gamma ** 2) / (edf - order))
+                    if tau2 < 1e-7:
+                        tau2 = 1e-7
+                    lam_old = lam
+                    lam = self._clamp(sig2 / tau2)
+                if abs(lam - lam_old) < 1e-7 or lam > 1e10:
+                    break
+            self.lambda_start = lam            # persist both, pbz.R:293
+            self.lambda2_start = lam2
+        else:
+            # CASE 1: fixed lambda -- user-supplied OR a warm-start rail flip
+            # (pbz.R:242-245).  lambda2 stays at the control default/rail, so
+            # the ML loop never runs and tau2/sig2 stay None (R's sigb = NA).
+            lam = float(lam_fixed)
+            beta, edf = self._regpen_z(Rmat, Qy, lam, lam2, p)[:2]
+            fv = X @ beta
+
+        return {
+            "fitted.values": fv,
+            "fv": fv,
+            "residuals": y - fv,
+            "nl_df": edf - 1,             # pbz.R:349 (pb is edf - 2)
+            "lambda": lam,
+            "lambda2": lam2,
+            "edf": edf,
+            "coef": beta,
+            "sig2": sig2,
+            "tau2": tau2,
+            "tau2_2": tau2_2,
+            "knots": self.knots,
+            "name": self.name,
+            "x": self.x,
+            "fun": _natural_spline(self.x, fv),
         }

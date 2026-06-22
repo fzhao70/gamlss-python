@@ -266,6 +266,17 @@ m <- gamlss(y ~ pb(x), family = NO, data = data.frame(x = xf, y = yf),
 record_pb("pb_few_distinct", m, list(x = xf, y = yf),
           list(family = "NO", formula = "y ~ pb(x)"))
 
+## R deparse re-renders numeric literals in the term label: lambda = 1000000
+## must be labelled "pb(x, lambda = 1e+06)" (scientific when strictly shorter)
+m <- gamlss(y ~ pb(x, lambda = 1000000), family = NO, data = abdom, control = ctrl)
+record_pb("pb_abdom_fl1e6", m, ad,
+          list(family = "NO", formula = "y ~ pb(x, lambda = 1000000)"))
+
+## order-1 difference penalty (random walk) instead of the default order 2
+m <- gamlss(y ~ pb(x, order = 1), family = NO, data = abdom, control = ctrl)
+record_pb("pb_abdom_order1", m, ad,
+          list(family = "NO", formula = "y ~ pb(x, order = 1)"))
+
 write_json(cases, "tests/reference/pb_fits.json", digits = NA,
            auto_unbox = TRUE, na = "string")
 cat("WROTE tests/reference/pb_fits.json with", length(cases), "cases:\n")

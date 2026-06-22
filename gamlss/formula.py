@@ -21,7 +21,7 @@ import numpy as np
 import pandas as pd
 import patsy
 
-from .smooth import PB
+from .smooth import PB, PBZ
 
 
 # ---------------------------------------------------------------- poly
@@ -152,6 +152,37 @@ _PB_KW = {"lambda": "lambda_", "max.df": "max_df"}
 _KW_ENV = {"TRUE": True, "FALSE": False, "T": True, "F": False, "NULL": None}
 
 
+def _r_num(x):
+    """Format a numeric like R's ``deparse``/``format(x, digits=15)``.
+
+    Smoother coefficient labels come from R's ``deparse(sys.call())``, which
+    re-renders numeric literals: 15 significant digits, scientific notation
+    only when *strictly* shorter than fixed (scipen = 0, ties -> fixed), with
+    a signed two-or-more-digit exponent.  So ``pb(x, lambda = 1000000)`` is
+    labelled ``pb(x, lambda = 1e+06)`` and ``lambda = 10000`` stays ``10000``.
+    """
+    x = float(x)
+    if x != x:               # NaN
+        return "NaN"
+    if x == 0.0:
+        return "0"
+    neg = x < 0
+    mant, exp = ("%.*e" % (14, abs(x))).split("e")
+    exp = int(exp)
+    mant = mant.rstrip("0").rstrip(".")
+    digits = mant.replace(".", "")
+    ndig = len(digits)
+    sci = "%se%+03d" % (mant, exp)
+    if exp >= ndig - 1:                       # integer (with trailing zeros)
+        fixed = digits + "0" * (exp - (ndig - 1))
+    elif exp >= 0:                            # decimal point inside the digits
+        fixed = digits[:exp + 1] + "." + digits[exp + 1:]
+    else:                                     # leading zeros
+        fixed = "0." + "0" * (-exp - 1) + digits
+    chosen = sci if len(sci) < len(fixed) else fixed
+    return "-" + chosen if neg else chosen
+
+
 def _is_smoother(term):
     """True if a formula term is a pb()/pbz() smoother call."""
     return _SMOOTHER_RE.fullmatch(term.strip()) is not None
@@ -175,11 +206,14 @@ def _split_args(s):
 
 
 def _parse_smoother(term, data, env):
-    """Parse ``pb(x, ...)`` -> (label, PB object, linear x column).
+    """Parse ``pb(x, ...)``/``pbz(x, ...)`` -> (label, smoother, design column).
 
     The first positional argument is the smoothed variable (evaluated in the
     data/formula environment); remaining ``key=value`` args are mapped to the
-    PB constructor (``lambda`` -> ``lambda_``, ``max.df`` -> ``max_df``).
+    PB/PBZ constructor (``lambda`` -> ``lambda_``, ``max.df`` -> ``max_df``).
+    The third return value is the column that goes into the *parametric*
+    design: the linear ``x`` for ``pb()`` (pb.R:116) or a column of zeros for
+    ``pbz()`` (pbz.R:89).
     """
     m = _SMOOTHER_RE.fullmatch(term.strip())
     kind, inner = m.group(1), m.group(2)
@@ -199,12 +233,22 @@ def _parse_smoother(term, data, env):
         k, v = k.strip(), v.strip()
         key = _PB_KW.get(k, k.replace(".", "_"))
         kwargs[key] = eval(v, {"__builtins__": {}}, dict(_KW_ENV))
-        norm_args.append(f"{k} = {v}")  # R deparse: "key = value"
+        # R's deparse re-renders numeric literals (1000000 -> 1e+06); keep
+        # non-numeric args (strings, TRUE/FALSE, expressions) verbatim.
+        try:
+            norm_args.append(f"{k} = {_r_num(float(v))}")
+        except (ValueError, TypeError):
+            norm_args.append(f"{k} = {v}")
+    label = f"{kind}({', '.join(norm_args)})"  # R-style term label
     if kind == "pbz":
-        raise NotImplementedError("pbz() is not implemented yet (Step 6)")
+        pb = PBZ(xval, **kwargs)
+        pb.name = args[0].strip()
+        # pbz() puts a column of ZEROS in the parametric design (pbz.R:89),
+        # not the linear x that pb() uses -- the whole effect lives in the
+        # smooth and the intercept absorbs the constant.
+        return label, pb, np.zeros_like(xval)
     pb = PB(xval, **kwargs)
     pb.name = args[0].strip()
-    label = f"{kind}({', '.join(norm_args)})"  # R-style term label
     return label, pb, xval
 
 
