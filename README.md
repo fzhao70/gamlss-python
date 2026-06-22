@@ -93,6 +93,16 @@ If you use GAMLSS in published work, please cite:
 > models for location, scale and shape (with discussion).
 > *Applied Statistics*, 54, 507-554.
 
+If you use this library, please also acknowledge this repository, for
+example:
+
+> gamlss-python contributors (2026). *gamlss-python: A Python
+> translation of the GAMLSS R packages.*
+> https://github.com/fzhao70/gamlss-python
+
+Thanks to all the users of this library for their interest, feedback,
+and contributions.
+
 ## Install
 
 ```bash
