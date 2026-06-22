@@ -61,13 +61,25 @@ ITER_COUNT_NONPORTABLE = {n for n in NAMES
 # optimisation (R nlminb); scipy's solvers don't reproduce those stopping
 # points bit-for-bit.  Measured parity is ~1e-6 on edf/fitted/deviance and
 # ~3e-5 on the (flat, least-determined) lambda itself, vs ~1e-13 for ML and
-# fixed-lambda.  These cases therefore use a relaxed tolerance.
+# fixed-lambda.  These cases therefore use a relaxed tolerance -- and, for the
+# same reason, their *iteration count* is not portable either: a slightly
+# different selected lambda nudges the RS deviance trajectory, so the number
+# of cycles to converge depends on the BLAS/LAPACK floating-point path (e.g.
+# pb_abdom_df3 / max.df / df_toobig take 2 cycles locally and with the
+# reference R but 4 under CI's build).  The converged model still matches, so
+# we assert the values (relaxed tol) but not the exact cycle count.
 OPTIMIZER_SELECTION = {"pb_abdom_df", "pb_abdom_maxdf", "pb_abdom_gaic",
                        "pb_abdom_gcv", "pb_abdom_df_sigma", "pb_abdom_df3",
                        "pb_abdom_df_cg", "pb_sim_two_df", "pb_abdom_df_mixed",
                        "pb_df_toobig"}
 # Not here (matched to ~1e-13, strict): pb_abdom_maxdf_off (inactive cap ->
 # plain ML) and pb_abdom_fixlam_cg (fixed lambda under CG is deterministic).
+
+# iteration count is asserted only for the deterministic fits: ML / fixed-lambda
+# under RS or CG.  mixed (RS->CG handoff) and optimiser-selected lambdas both
+# settle in a BLAS-path-dependent number of cycles (see the notes above).
+ITER_COUNT_PORTABLE = lambda n: (n not in ITER_COUNT_NONPORTABLE
+                                 and n not in OPTIMIZER_SELECTION)
 
 
 def get_fit(name):
@@ -100,9 +112,10 @@ def test_pb_fit_matches_r(name):
     assert m.family[0] == ref["family"]
     assert m.parameters == list(ref["parameters"])
 
-    # identical iteration path -> identical cycle count and convergence
-    # (mixed RS->CG cycle counts are BLAS-path dependent; see note above)
-    if name not in ITER_COUNT_NONPORTABLE:
+    # identical iteration path -> identical cycle count and convergence, but
+    # only for deterministic fits (mixed and optimiser-selected lambdas have
+    # BLAS-path-dependent cycle counts; see notes above)
+    if ITER_COUNT_PORTABLE(name):
         assert m.iter == ref["iter"], \
             f"iteration count {m.iter} != R {ref['iter']}"
     assert bool(m.converged) == bool(ref["converged"])
