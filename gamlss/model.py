@@ -188,6 +188,10 @@ class GamlssResults:
 
     def _cal_terms(self, what, se_fit=False, terms=None):
         """Port of cal.terms inside lpred(): per-term contributions."""
+        if getattr(self, f"{what}_coefSmo", None):
+            raise NotImplementedError(
+                "type='terms' with pb() smoothers is not supported yet "
+                "(term plots for smoothers are a planned follow-up)")
         di = getattr(self, f"{what}_terms")
         X = getattr(self, f"{what}_x")
         qr = getattr(self, f"{what}_qr")
@@ -272,7 +276,7 @@ class GamlssResults:
         from .engine import lm_wfit
 
         pf = ParamFormula(getattr(self, f"{what}_formula"), combined)
-        X, di = pf.design(combined)
+        X, di, _smoothers = pf.design(combined)
         offsetVar = pf.offset(combined, len(combined))
         y_work = getattr(self, f"{what}_lp").copy()
         wt = getattr(self, f"{what}_wt")
@@ -291,7 +295,12 @@ class GamlssResults:
                 " used to achieve 'safe' predictions"
             )
         Xpred = X[~onlydata]
+        coefsmo = getattr(self, f"{what}_coefSmo", None)
         if type == "terms":
+            if coefsmo:
+                raise NotImplementedError(
+                    "type='terms' with pb() smoothers is not supported yet "
+                    "(term plots for smoothers are a planned follow-up)")
             term_names = []
             asgn = {}
             hasintercept = False
@@ -329,9 +338,44 @@ class GamlssResults:
         pred = Xpred @ np.where(np.isnan(coef_new), 0.0, coef_new)
         if pf.offset_exprs:
             pred = pred + offsetVar[~onlydata]
+        if coefsmo:  # add smoother contributions: getSmo(...)$fun(xeval)
+            pred = pred + self._smooth_pred(coefsmo, newdata)
         if type == "response":
             pred = self._family_obj.linkinv(what)(pred)
         return np.asarray(pred)
+
+    def _smooth_pred(self, coefsmo, newdata):
+        """Sum of the fitted smoothers evaluated at newdata: fun(xeval).
+
+        Mirrors predict.gamlss's smoothing part, where each pb() term's
+        prediction is getSmo(object, ...)$fun(xeval) -- the stored natural
+        spline through the fitted values evaluated at the new x.
+        """
+        from .formula import _DataEnv, _base_env, _r_to_patsy
+
+        total = None
+        for sm in coefsmo:
+            xnew = eval(_r_to_patsy(sm["name"]), {"__builtins__": {}},
+                        _DataEnv(newdata, _base_env()))
+            if isinstance(xnew, pd.Series):
+                xnew = xnew.to_numpy()
+            contrib = np.asarray(sm["fun"](np.asarray(xnew, dtype=float)),
+                                 dtype=float)
+            total = contrib if total is None else total + contrib
+        return total
+
+    def getSmo(self, what="mu", parameter=None, which=1):
+        """Port of getSmo(): fitted smoother object(s) for a parameter.
+
+        ``which`` is 1-based as in R; ``which=0`` returns the whole list.
+        """
+        what = parameter or what
+        if what not in self.parameters:
+            raise ValueError(f"{what} is not a parameter in the object")
+        allsmo = getattr(self, f"{what}_coefSmo", None)
+        if not allsmo:
+            raise ValueError(f"there are no smoothers fitted in {what}")
+        return allsmo if which == 0 else allsmo[which - 1]
 
     def predictAll(self, newdata=None, data=None, output="list"):
         """Port of predictAll(): fitted parameters for new data."""

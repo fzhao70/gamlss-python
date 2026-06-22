@@ -30,6 +30,7 @@ from .methods import (
     deviance,
     fitted,
     fv,
+    getSmo,
     is_gamlss,
     logLik,
     lp,

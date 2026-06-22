@@ -62,6 +62,10 @@ def predictAll(object, newdata=None, data=None, output="list"):
     return object.predictAll(newdata=newdata, data=data, output=output)
 
 
+def getSmo(object, what="mu", parameter=None, which=1):
+    return object.getSmo(what=what, parameter=parameter, which=which)
+
+
 def residuals(object, what="z-scores", type="simple", terms=None):
     return object.get_residuals(what=what, type=type, terms=terms)
 
