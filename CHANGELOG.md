@@ -54,6 +54,16 @@ values, deviance, df, edf, λ and predictions — matches R.
 
 ### Fixed
 
+- `pb()` ML smoothing now persists the **final** converged `λ` as the warm
+  start for the next fit, matching R's `assign(startLambdaName, lambda)` after
+  the ML loop (`pb.R:35`). The warm-start assignment sat *inside* the ML loop,
+  after the convergence `break`, so on convergence the last iterate was
+  dropped and the next `pb()` fit warm-started one step stale. The stale start
+  nudged the ML trajectory and could add an extra backfitting sweep, drifting
+  the RS per-iteration deviance off R's (converged results were unaffected).
+  The `GAIC`/`GCV` branches and `pbz()` already persisted after their loops;
+  `pb()` ML now matches (reported in #1).
+
 - Smoother term labels now match R's `deparse` of numeric literals: a value
   like `lambda = 1000000` is rendered `lambda = 1e+06` (scientific notation
   when strictly shorter than fixed, 15 significant digits), so `pb()`/`pbz()`
