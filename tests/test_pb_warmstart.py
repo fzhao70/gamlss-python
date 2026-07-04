@@ -1,15 +1,19 @@
-"""Warm-start (lambda persistence) regression tests for pb() / pbz().
+"""Warm-start (lambda persistence) tests for pb() / pbz().
 
-R-independent: these assert an internal invariant of the ML smoothing-parameter
-loop, so they run without the R reference JSONs.
+R-independent: these lock the *exact* lambda-persistence behaviour of R gamlss
+5.5-0, which pb() and pbz() implement asymmetrically -- so this port must too.
 
-Regression for issue #1: gamlss.pb() persists the *final* converged lambda as
-the warm start for the next fit() (R does assign(startLambdaName, lambda) after
-the ML loop, pb.R:35).  PB.fit previously assigned self.lambda_start inside the
-loop, positioned after the convergence `break`, so on convergence the final
-iterate was never stored -- the next fit() warm-started one step stale, which
-desynchronised the RS iteration trajectory from R.  PBZ.fit already persisted
-after its loop; this checks both stay correct.
+  - gamlss.pb (pb.R:296-297): assign(startLambdaName, lambda) sits INSIDE the
+    ML loop, AFTER the convergence `break`.  On convergence the break skips it,
+    so R persists the SECOND-TO-LAST lambda as the warm start.
+  - gamlss.pbz (pb_goingtozero.R:291-293): assign sits AFTER the loop, so R
+    persists the FINAL lambda.
+
+Guard for issue #1: a proposed change hoisted pb's assignment out of the loop
+so it persisted the final lambda (matching pbz).  That is mathematically tidier
+but DIVERGES from R gamlss 5.5-0, whose bit-for-bit reproduction is this port's
+whole purpose.  These tests fail if pb is changed to persist the final lambda,
+or if pbz is changed to persist the second-to-last.
 """
 
 from __future__ import annotations
@@ -26,36 +30,27 @@ def _wiggly_data(n=300, seed=0):
     return x, y, np.ones(n)
 
 
-def test_pb_ml_persists_final_lambda():
-    """After a converged ML pb fit, lambda_start == the returned lambda.
+def test_pb_persists_second_to_last_lambda_like_r():
+    """pb() persists the second-to-last ML iterate (R pb.R:296-297).
 
-    With the pre-fix code lambda_start held the *second-to-last* iterate, which
-    differs from the returned (final) lambda -- so this equality fails.
+    After a converged multi-iteration ML fit, ``lambda_start`` holds the iterate
+    from *before* the breaking iteration -- so it differs from the returned
+    (final) lambda, but only by the convergence tolerance.  Hoisting the assign
+    out of the loop (persisting the final lambda) makes ``lambda_start`` equal
+    the returned lambda and fails this test.
     """
     x, y, w = _wiggly_data()
     sm = PB(x)                                   # ML, cold start 10.0
     r = sm.fit(y, w)
-    assert sm.lambda_start == r["lambda"]        # exact: final iterate stored
+    # the final assign is skipped by `break`, so the persisted warm start is the
+    # prior iterate -- distinct from the returned lambda ...
+    assert sm.lambda_start != r["lambda"]
+    # ... but only by less than the ML convergence tolerance
+    assert abs(sm.lambda_start - r["lambda"]) < 1e-7
 
 
-def test_pb_ml_warm_start_reproduces_fit():
-    """Re-fitting the same data from the persisted warm start reproduces the
-    converged fit (within the ML loop's 1e-7 tolerance).  The single-call
-    invariant lambda_start == returned lambda still holds exactly."""
-    x, y, w = _wiggly_data(seed=1)
-    sm = PB(x)
-    r1 = sm.fit(y, w)                             # cold start -> converged lam
-    r2 = sm.fit(y, w)                             # warm start from convergence
-    assert sm.lambda_start == r2["lambda"]        # exact single-call invariant
-    # warm-starting at (near) the fixed point returns essentially the same
-    # lambda and fit -- a shift < the 1e-7 ML tolerance, not a fresh descent
-    np.testing.assert_allclose(r2["lambda"], r1["lambda"], atol=1e-6)
-    np.testing.assert_allclose(r2["fitted.values"], r1["fitted.values"],
-                               atol=1e-6)
-
-
-def test_pbz_ml_persists_final_lambda():
-    """PBZ.fit already persists after its ML loop; guard it stays that way."""
+def test_pbz_persists_final_lambda_like_r():
+    """pbz() persists the FINAL ML iterate (R pb_goingtozero.R:291-293)."""
     x, y, w = _wiggly_data(seed=2)
     sm = PBZ(x)
     r = sm.fit(y, w)

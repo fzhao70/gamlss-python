@@ -249,14 +249,17 @@ class PB:
                         lam = 1e7
                     if abs(lam - lam_old) < 1e-7 or lam > 1e10:
                         break
-                # persist the *final* converged lambda as the warm start, so
-                # the next fit() starts where this one finished.  R assigns
-                # startLambdaName <- lambda *after* the ML loop (pb.R:35), as do
-                # the GAIC/GCV branches below and PBZ.fit.  Assigning inside the
-                # loop (before the break) dropped the final iterate on
-                # convergence, warm-starting the next call one step stale and
-                # desynchronising the RS iteration trajectory from R (issue #1).
-                self.lambda_start = lam
+                    # persist INSIDE the loop, AFTER the break -- mirrors R
+                    # gamlss 5.5-0 pb.R:296-297, where assign(startLambdaName,
+                    # lambda) follows `break` inside `for (it in 1:50)`.  On
+                    # convergence the break skips it, so R (and this port)
+                    # persist the *second-to-last* lambda as the warm start.
+                    # Do NOT hoist this out of the loop: pbz persists the final
+                    # lambda (pb_goingtozero.R:293, assign after its loop) but
+                    # pb deliberately does not -- reproducing that asymmetry is
+                    # required for RS-trajectory parity with R (issue #1; guard
+                    # in tests/test_pb_warmstart.py).
+                    self.lambda_start = lam
             elif self.method == "GAIC":
                 # minimise local GAIC = sum w (y-fv)^2 + k*edf, pb.R:76-81.
                 # R uses nlminb -- a *local* search from the warm-start lambda
