@@ -183,6 +183,7 @@ WEI3, TF, PE, GG, SN1, JSU, JSUo, SHASHo, BCCG, BCCGo, BCT, BCTo,
 BCPE, BCPEo, BE, BEo`
 Discrete: `PO, NBI, NBII, GEOM, PIG, LG, ZIP, ZIP2, ZINBI, ZANBI`
 Binomial-type: `BI, BB, ZABI, ZIBI`
+Mixed (zero adjusted continuous): `ZAGA, ZAIG`
 
 Each family ships its `d`/`p`/`q`/`r` functions (`dGA`, `pGA`, ...)
 matching the R parameterisations exactly.

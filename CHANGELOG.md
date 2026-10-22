@@ -7,6 +7,32 @@ README for the verification methodology).
 
 ## [Unreleased]
 
+### Added — zero adjusted continuous families `ZAGA` and `ZAIG`
+
+Ports of gamlss.dist `R/ZAGA.R` and `R/ZAIG.R`: a point mass at zero with
+probability `nu` and a gamma (`ZAGA`) or inverse Gaussian (`ZAIG`)
+distribution for `y > 0`, type `"Mixed"`, each with `d`/`p`/`q`/`r`.
+
+```python
+m = gl.gamlss("y ~ x", nu_formula="~x", family=gl.ZAGA(), data=df)
+```
+
+Quantile residuals follow R's `rqres(type = "Mixed", mass.p = 0,
+prob.mp = nu)`: a family's `rqres` spec may now name a fitted parameter
+in `prob_mp` (`"prob_mp": "nu"`), resolved from the fitted values in
+`model.py`. Zeros get randomised residuals in `(0, nu)`, so only the
+residuals of `y > 0` are compared with R.
+
+Verified against R (gamlss 5.5-0, gamlss.dist 6.1-11) on RS, CG and a
+probit `nu` link: coefficients, fitted values, predictions, df,
+deviance/AIC/SBC, qr and vcov standard errors and the exact iteration
+count (`tests/test_za.py`, reference `r-scripts/gen_za_reference.R`).
+`qZAIG` agrees at R's `uniroot` tolerance (~1.2e-4), like `qIG`; the test
+also checks that Python's root maps back to `p` within 1e-10. `qZAIG`
+reproduces R in applying `lower.tail`/`log.p` both on entry and on exit,
+and `pZAIG` uses `pIG`'s log-scale evaluation where R integrates `dIG`
+numerically after an overflow (identical wherever R's value is finite).
+
 ### Added — shrink-to-zero P-spline smoother `pbz()`
 
 Model formulas may now contain `pbz()` terms, e.g.

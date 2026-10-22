@@ -18,6 +18,19 @@ from scipy.linalg import solve_triangular
 
 from .rqres import rqres as _rqres_fun
 
+
+def _rqres_kwargs(spec, params):
+    """Extra rqres() arguments from a family's rqres spec.
+
+    For "Mixed" families R writes ``prob.mp = nu``: the point-mass
+    probability is a fitted parameter, so the spec may name it as a
+    string (e.g. ``"prob_mp": "nu"``) and it is resolved from ``params``.
+    """
+    kwargs = {k: v for k, v in spec.items() if k not in ("pfun", "type")}
+    if isinstance(kwargs.get("prob_mp"), str):
+        kwargs["prob_mp"] = params[kwargs["prob_mp"]]
+    return kwargs
+
 PARAM_ORDER = ("mu", "sigma", "nu", "tau")
 
 
@@ -48,7 +61,7 @@ class GamlssResults:
             return None
         if hasattr(self, "bd"):
             params["bd"] = self.bd
-        kwargs = {k: v for k, v in spec.items() if k not in ("pfun", "type")}
+        kwargs = _rqres_kwargs(spec, params)
         return _rqres_fun(pfun, type=spec["type"], y=self.y, rng=self.rng,
                           **kwargs, **params)
 
@@ -129,8 +142,7 @@ class GamlssResults:
                 }
                 if hasattr(self, "bd"):
                     params["bd"] = np.repeat(self.bd, reps)
-                kwargs = {k: v for k, v in spec.items()
-                          if k not in ("pfun", "type")}
+                kwargs = _rqres_kwargs(spec, params)
                 return _rqres_fun(pfun, type=spec["type"],
                                   y=np.repeat(self.y, reps), rng=self.rng,
                                   **kwargs, **params)
