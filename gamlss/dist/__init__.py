@@ -38,6 +38,8 @@ from .NBII import NBII, dNBII, pNBII, qNBII, rNBII
 from .GEOM import GEOM, dGEOM, pGEOM, qGEOM, rGEOM
 from .PIG import PIG, dPIG, pPIG, qPIG, rPIG
 from .ZIP import ZIP, dZIP, pZIP, qZIP, rZIP
+from .ZAGA import ZAGA, dZAGA, pZAGA, qZAGA, rZAGA
+from .ZAIG import ZAIG, dZAIG, pZAIG, qZAIG, rZAIG
 from .ZIP2 import ZIP2, dZIP2, pZIP2, qZIP2, rZIP2
 from .ZINBI import ZINBI, dZINBI, pZINBI, qZINBI, rZINBI
 from .ZANBI import ZANBI, dZANBI, pZANBI, qZANBI, rZANBI
